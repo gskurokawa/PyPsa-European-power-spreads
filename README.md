@@ -1,4 +1,4 @@
-# pypsa-spread-sensitivity
+# PyPsa European power spread models and study
 
 **How much does the way a model represents transmission limits change the
 day-ahead price spreads it produces?**
