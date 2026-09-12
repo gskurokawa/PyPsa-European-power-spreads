@@ -12,7 +12,7 @@ set /a ATTEMPT=0
 set /a ATTEMPT+=1
 echo.
 echo ================ attempt %ATTEMPT% at %TIME% ================
-python scripts\01_pull_entsoe.py
+python scripts\pipeline\01_pull_entsoe.py
 if %ERRORLEVEL%==0 goto done
 if %ATTEMPT% GEQ 25 goto giveup
 echo.

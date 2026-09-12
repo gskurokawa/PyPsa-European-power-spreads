@@ -82,11 +82,15 @@ experiment.
 run_pipeline.py        the stages, in order
 run_shocks.py          the perturbation experiment
 src/spread/            the library: network construction, processing, validation
-scripts/pipeline/      the stages themselves, numbered in execution order
+scripts/pipeline/      the sixteen stages, numbered in execution order
 scripts/analysis/      the analyses behind the numbers in RESULTS.md
-scripts/diagnostics/   one-off checks kept as an audit trail; not needed to reproduce
 config/                fleet, technology and zone configuration
 ```
+
+Each model run reports its own statistics — the fifteen acceptance criteria, the
+spread means and standard deviations, and how often each border separates — into
+`logs/run_<tag>.txt`, using `src/spread/validate.py`. The scripts in
+`scripts/analysis/` are the comparisons *across* runs.
 
 Nothing under `data/` is committed — every input is public and is rebuilt by the
 scripts. The raw flow-based domain alone is about 120 MB a year.

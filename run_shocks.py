@@ -92,7 +92,7 @@ for arm, extra in arms.items():
     for sh in SHOCKS:
         tag = f"{arm}-{a.year}-" + (sh.replace("+", "up").replace("-", "dn")
                                     if sh else "base")
-        cmd = [sys.executable, "scripts/10_build_network.py",
+        cmd = [sys.executable, "scripts/pipeline/10_build_network.py",
                "--year", str(a.year), "--chunk-days", "30",
                "--tag", tag] + extra
         if a.bid_ladder is not None:

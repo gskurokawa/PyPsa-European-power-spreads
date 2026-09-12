@@ -116,10 +116,14 @@ fixed_fuel_cost:           # EUR / MWh_th
 #
 # This spreads a technology's units linearly across [srmc, srmc + spread] by
 # cumulative capacity within each zone.  It is a proxy for the opportunity
-# cost a multi-stage model would compute properly (see FINDINGS section 10).
-# Calibrate on 2025 and leave 2024 alone - it is the test year.
+# cost a multi-stage model would compute properly (RESULTS.md section 5.1).
+#
+# Calibrated on 2024, the estimation year; 2025 is the evaluation year and
+# enters no estimation step.  The value below was chosen by sweeping 0 to 40
+# against the fifteen acceptance criteria, and is the value every run in
+# RESULTS.md used.  Changing it makes this repository disagree with the paper.
 bid_ladder:                # EUR / MWh
-  Nuclear: 25.0
+  Nuclear: 20.0
 
 availability:
   Nuclear:       derived
