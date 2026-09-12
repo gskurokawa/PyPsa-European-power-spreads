@@ -1,0 +1,38 @@
+# ---- secrets --------------------------------------------------------------
+.env
+
+# ---- virtual environments -------------------------------------------------
+.venv/
+.venv-data/
+.venv-fleet/
+venv/
+
+# ---- python ---------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- editors --------------------------------------------------------------
+.idea/
+.vscode/
+
+# ---- data -----------------------------------------------------------------
+# Nothing under data/ is committed. Every input is public and is rebuilt by
+# the scripts in scripts/; the raw JAO domain alone is ~120 MB a year.
+data/raw/
+data/processed/
+data/fleet/
+*.nc
+*.parquet
+
+# ---- run output -----------------------------------------------------------
+logs/
+
+# ---- superseded working document ------------------------------------------
+# RESULTS.md is the paper. FINDINGS.md is the older working draft it replaced.
+FINDINGS.md
+
+# ---- scratch --------------------------------------------------------------
+JAO_test.py

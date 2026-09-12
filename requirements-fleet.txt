@@ -1,0 +1,15 @@
+# Separate environment for the one-off fleet extraction.
+#
+#   py -3.14 -m venv .venv-fleet
+#   .venv-fleet\Scripts\activate
+#   pip install -r requirements-fleet.txt
+#   python scripts\05_build_fleet.py
+#   deactivate
+#
+# powerplantmatching pins pandas<3 while PyPSA 1.3 requires pandas>=3, so the
+# two cannot share an environment. The fleet is extracted once and committed
+# as data/fleet/fleet.csv, which means the model environment never needs this
+# package and anyone cloning the repo can run the model without it.
+powerplantmatching
+pyarrow
+pyyaml

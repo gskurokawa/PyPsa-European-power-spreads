@@ -1,0 +1,18 @@
+# Separate environment for fetching market data. Kept apart from .venv so that
+# yfinance's dependency tree can never move pandas underneath PyPSA - the same
+# collision powerplantmatching caused, which cost an afternoon.
+#
+#   py -m venv .venv-data
+#   .venv-data\Scripts\activate
+#   pip install -r requirements-data.txt
+#   python scripts\06_fetch_fuel_prices.py
+#
+# The script only writes CSVs into data/raw/fuel/. Everything downstream reads
+# them from the main .venv.
+pandas
+pyarrow
+pyyaml
+yfinance
+openpyxl
+xlrd
+requests

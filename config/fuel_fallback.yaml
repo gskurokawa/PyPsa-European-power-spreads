@@ -1,0 +1,45 @@
+# APPROXIMATE monthly fuel and carbon prices - PLACEHOLDERS ONLY.
+#
+# These exist so the pipeline runs end to end before the real series are in
+# place. They are recalled approximations, not data, and every one should be
+# replaced by a downloaded file in data/raw/fuel/ before any result is
+# published. The build script prints a warning naming each series still
+# running on fallback.
+#
+# ttf:  EUR/MWh_th        eua: EUR/tCO2        api2: USD/tonne
+
+fx_usd_per_eur: 1.08
+
+monthly:
+  2024-01: {ttf: 31, eua: 65, api2: 108}
+  2024-02: {ttf: 26, eua: 57, api2: 102}
+  2024-03: {ttf: 27, eua: 59, api2: 105}
+  2024-04: {ttf: 29, eua: 68, api2: 108}
+  2024-05: {ttf: 33, eua: 72, api2: 110}
+  2024-06: {ttf: 34, eua: 70, api2: 108}
+  2024-07: {ttf: 33, eua: 67, api2: 106}
+  2024-08: {ttf: 38, eua: 71, api2: 110}
+  2024-09: {ttf: 36, eua: 66, api2: 108}
+  2024-10: {ttf: 40, eua: 65, api2: 112}
+  2024-11: {ttf: 45, eua: 67, api2: 112}
+  2024-12: {ttf: 45, eua: 68, api2: 110}
+  2025-01: {ttf: 48, eua: 76, api2: 110}
+  2025-02: {ttf: 52, eua: 80, api2: 105}
+  2025-03: {ttf: 43, eua: 71, api2: 100}
+  2025-04: {ttf: 35, eua: 66, api2: 96}
+  2025-05: {ttf: 35, eua: 71, api2: 98}
+  2025-06: {ttf: 37, eua: 73, api2: 100}
+  2025-07: {ttf: 35, eua: 71, api2: 105}
+  2025-08: {ttf: 33, eua: 73, api2: 103}
+  2025-09: {ttf: 32, eua: 76, api2: 102}
+  2025-10: {ttf: 32, eua: 78, api2: 104}
+  2025-11: {ttf: 31, eua: 80, api2: 105}
+  2025-12: {ttf: 33, eua: 82, api2: 106}
+  2026-01: {ttf: 34, eua: 84, api2: 106}
+  2026-02: {ttf: 32, eua: 82, api2: 104}
+  2026-03: {ttf: 30, eua: 80, api2: 102}
+  2026-04: {ttf: 28, eua: 79, api2: 100}
+  2026-05: {ttf: 28, eua: 81, api2: 100}
+  2026-06: {ttf: 29, eua: 83, api2: 101}
+  2026-07: {ttf: 30, eua: 85, api2: 102}
+  2026-08: {ttf: 30, eua: 84, api2: 102}

@@ -1,0 +1,10 @@
+pypsa>=0.34
+highspy
+entsoe-py>=0.6.16
+pandas>=3.0        # PyPSA 1.3 requires it; powerplantmatching pins <3, so it lives in .venv-fleet
+numpy
+pyarrow
+pyyaml
+python-dotenv
+matplotlib
+psutil            # peak memory measurement, sizes the Monte Carlo

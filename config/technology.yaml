@@ -1,0 +1,626 @@
+# Thermal technology assumptions.
+#
+# These are the numbers that set the merit order, so they are here in the open
+# rather than buried in a package. Every one is arguable - argue with them.
+#
+# efficiency: net electrical, MWh_e per MWh_th
+# co2:        tonnes CO2 per MWh_th of fuel burnt
+# vom:        variable O&M, EUR per MWh_e, excluding fuel and carbon
+#
+# Efficiency improves with vintage, so each technology carries a band by
+# commissioning year. A 1975 hard coal unit and a 2015 one are ~9 points apart,
+# which is roughly EUR 6/MWh at typical coal and carbon prices - enough to
+# reorder them in the stack, which is the whole point of tracking it.
+
+emission_factors:          # t CO2 / MWh_th
+  Lignite:      0.364
+  Hard Coal:    0.341
+  Natural Gas:  0.202
+  Oil:          0.267
+  Waste:        0.330
+  Bioenergy:    0.0        # treated as carbon neutral under the EU ETS
+  Nuclear:      0.0
+
+vom:                       # EUR / MWh_e
+  Lignite:      4.0
+  Hard Coal:    3.5
+  CCGT:         2.0
+  OCGT:         3.0
+  Steam Turbine: 3.0
+  Oil:          3.0
+  Nuclear:      9.0
+  Bioenergy:    4.0
+  Waste:        4.0
+
+# Net electrical efficiency by commissioning year. Keys are the first year of
+# each band; a unit takes the band it was commissioned in.
+efficiency:
+  Lignite:
+    1900: 0.33
+    1985: 0.36
+    2000: 0.40
+    2010: 0.43
+  Hard Coal:
+    1900: 0.36
+    1985: 0.38
+    2000: 0.42
+    2010: 0.45
+  CCGT:
+    1900: 0.48
+    1995: 0.53
+    2005: 0.57
+    2015: 0.60
+  OCGT:
+    1900: 0.33
+    1995: 0.36
+    2005: 0.38
+    2015: 0.40
+  Steam Turbine:           # gas-fired steam, older and less efficient
+    1900: 0.35
+    1990: 0.38
+  Oil:
+    1900: 0.35
+  Nuclear:
+    1900: 0.33
+  Bioenergy:
+    1900: 0.35
+  Waste:
+    1900: 0.25
+
+# Fuels with no traded price. Lignite is mine-mouth and never trades, so its
+# cost is an operating assumption rather than a market series - which is why
+# the CO2 price, not the fuel price, is what moves Polish and German lignite.
+# EVERY fuel must appear here or in the traded series, or it silently costs
+# nothing. Oil was missing: marginal_costs() maps only Natural Gas and Hard
+# Coal to market prices, so oil fell through to .fillna(0.0) and burnt free
+# fuel at about 57 EUR/MWh - which made it mid-merit baseload rather than a
+# peaker, and put 1.8 GW of German "oil" on all month against an observed 0.4.
+# scripts/10_build_network.py now refuses to run if a fuel has no price.
+fixed_fuel_cost:           # EUR / MWh_th
+  Lignite:   4.0
+  Nuclear:   6.0
+  Bioenergy: 25.0
+  Waste:     0.0           # deliberate: waste plants are PAID to take fuel
+  Oil:       60.0          # light fuel oil, roughly 700 USD/t at 11.9 MWh/t.
+                           # A fixed assumption, not a series - European oil
+                           # generation is small enough that it never sets a
+                           # price this study cares about, but it must not be
+                           # free.
+
+# Share of nameplate capacity actually available, averaged over the year.
+# Covers planned and forced outages. Without this every unit runs whenever it
+# is economic, which makes the system look far larger than it is: French
+# nuclear sat at 63 GW in the first solve against a real January of 50-55 GW.
+#
+# Nuclear is "derived" instead of a constant - it runs baseload, so a rolling
+# maximum of observed generation is a good proxy for what was available, and
+# it carries the real seasonal outage pattern rather than a flat number. That
+# same series becomes the French nuclear driver in package E.
+
+# --------------------------------------------------------------------------
+# bid_ladder - EUR/MWh spread across a technology's stack WITHIN each zone
+#
+# Nuclear's short-run cost is 6.0 / 0.33 + 9.0 = 27.18 EUR/MWh, and with a
+# flat offer every nuclear unit in a zone sits on exactly that number.  In
+# France that is 62,990 MW at one price, against an average load near 49,000
+# and a peak near 80,000 - so demand lands INSIDE the block for most of the
+# year and nuclear is marginal at 27.18.  The 2024 run shows the consequence:
+# French modelled deciles 3 to 7 read 27.2, 27.3, 27.3, 27.4, 27.4 where the
+# observed series climbs 25.4, 40.2, 53.0, 63.9, 74.5, and France comes out
+# 30% low overall while over-exporting by 2.5 GW.
+#
+# A flat offer is also wrong on its own terms.  Nuclear is ENERGY-LIMITED:
+# the annual fuel cycle and the refuelling schedule are planned around
+# expected prices, so the last megawatt of a fleet is not offered at the cost
+# of the first.  Its opportunity cost rises as more of the fleet is called.
+#
+# This spreads a technology's units linearly across [srmc, srmc + spread] by
+# cumulative capacity within each zone.  It is a proxy for the opportunity
+# cost a multi-stage model would compute properly (see FINDINGS section 10).
+# Calibrate on 2025 and leave 2024 alone - it is the test year.
+bid_ladder:                # EUR / MWh
+  Nuclear: 25.0
+
+availability:
+  Nuclear:       derived
+  Lignite:       0.88
+  Hard Coal:     0.86
+  CCGT:          0.92
+  OCGT:          0.92
+  Steam Turbine: 0.88
+  Oil:           0.90
+  Bioenergy:     0.85
+  Waste:         0.88
+
+# Minimum output as a share of what is available, i.e. must-run.
+#
+# In an LP with no commitment constraints every unit can cycle to zero, so
+# low-demand hours are met by simply switching plant off and the price stays
+# on whatever step it was already on. Real systems cannot do that: nuclear and
+# lignite have minimum stable levels and are slow to move, biomass and waste
+# run for their subsidy or their heat load, and a large slice of European gas
+# is industrial or district-heating CHP that follows steam demand rather than
+# the power price.
+#
+# The consequence in the data is oversupply in quiet hours - prices collapsing
+# and sometimes going negative - which is a large part of where price variance
+# comes from. Without must-run the first solve produced German prices with a
+# standard deviation of 7 EUR/MWh in a month where reality was nearer 30.
+# Calibrated against DISPATCH, not price. scripts/15_dispatch_validation.py
+# compares output per technology against ENTSO-E generation in the cheapest
+# 10% of hours, which is where must-run behaviour shows. In the first run the
+# German mix in those hours was 10.4 GW lignite and 2.0 GW gas against an
+# observed 6.1 and 6.1 - the right total thermal to within 3%, the wrong split.
+# Gas was under-run in the cheap hours in seven of eight zones (France 0.29,
+# Austria 0.26, Czechia 0.24, Belgium 0.45), which is district-heating and
+# industrial CHP running for its steam host rather than for the power price.
+# Only Steam Turbine carried a share; CCGT carried none.
+#
+# Generation is a better calibration target than price: it is a primary
+# observable, it is published per technology, and it is not what the model is
+# being validated on.
+must_run:
+  # Nuclear was 0.50. France, Czechia and Switzerland all produced far too few
+  # negative price hours in 2024 - 78 against 352, 212 against 315, 68 against
+  # 292 - and they share this parameter. Individual reactors have technical
+  # minima near 20-30%, but the FLEET does not cycle that hard: French nuclear
+  # rarely falls below about 70% of available output even when prices are
+  # deeply negative, because moving a reactor is slow and xenon transients
+  # punish deep cycling. Letting it drop to half of available lets the model
+  # relieve a surplus that reality had to absorb by paying people to take it.
+  #
+  # 0.65 overshot - negative hours went past observed in four zones at once
+  # (DE 645/457, FR 456/352, BE 512/404). 0.58 splits the difference. The
+  # count is the check, and it is checkable in every zone independently.
+  Nuclear:       0.58
+  Lignite:       0.25    # was 0.40. Same table, other direction: 9.0 GW
+                         # modelled against 6.1 observed in Germany's cheap
+                         # hours and 5.7 against 2.9 in Poland's. The model was
+                         # holding lignite on and cycling hard coal off; both
+                         # systems do the opposite.
+  Bioenergy:     0.70
+  Waste:         0.70
+  Steam Turbine: 0.30    # largely CHP following a heat load
+  CCGT:          0.25    # ditto - much of European CCGT is a steam host's
+                         # plant that happens to export power
+  Hard Coal:     0.30    # was 0.15. In the cheapest hours the model ran 1.6 GW
+                         # of German hard coal against an observed 3.0, and 2.1
+                         # GW of Polish against 6.5. Polish hard coal is
+                         # district-heating backbone plant: it runs through the
+                         # trough. Two zones asked for the same correction
+                         # independently, which is why this is a technology
+                         # parameter and not a zone fudge.
+
+# Capacity that sits above the energy merit order and is absent from the
+# generation register: interruptible industrial load, aggregated demand-side
+# response, and reserve products the TSO can call.
+#
+# Without it an LP price can never exceed the most expensive unit in merit -
+# here about 120 EUR/MWh - because there is always something cheaper still
+# available. Real markets price scarcity well above short-run cost, and the
+# missing top of the stack is most of why simulated variance falls short.
+#
+# Volumes are a share of each zone's peak demand and reflect published
+# European DSR participation, which runs at roughly 1-3% of peak. These are
+# assumptions, not fitted values: they were not tuned to close the gap.
+# The ladder was two steps, 2% of peak at 250 and 2% at 600. That pinned the
+# 99th percentile at exactly 250 in every one of the eight parameter sets in
+# the reserve sweep - the model dispatched cheap DSR to free thermal headroom
+# rather than pay the reserve shortfall price, so 250 became a hard ceiling.
+#
+# Same total volume, 4% of peak, resolved into four steps instead of two. This
+# is finer price resolution on the same assumption, not a larger one, and the
+# range brackets published European VOLL estimates rather than being tuned to
+# a target percentile.
+scarcity_tiers:
+  - {share_of_peak: 0.005, price: 200}
+  - {share_of_peak: 0.010, price: 300}
+  - {share_of_peak: 0.010, price: 500}
+  - {share_of_peak: 0.015, price: 1200}
+
+
+# Availability capped by observed output.
+#
+# The constants above are annual averages and they left the model carrying 26
+# GW of spare thermal capacity in Germany in the tightest 5% of hours - almost
+# all of it gas, against a real February in which German gas never reached
+# those levels at any price. Capacity that did not respond to a 300 EUR/MWh
+# signal is not available capacity, whatever the register says.
+#
+# So each technology's availability is additionally capped by a rolling
+# maximum of its observed output. The window is long on purpose: a plant out
+# of merit for a fortnight would otherwise look broken. The floor stops a
+# quiet month from deleting a fleet. And the cap can only reduce the constant
+# above, never raise it - it is an upper bound derived from evidence, not an
+# estimate of availability.
+availability_from_observed:
+  enabled: true
+  window_hours: 720        # 30 days, long enough to contain a tight event
+  floor: 0.45
+  entsoe_series:
+    Lignite:       "Fossil Brown coal/Lignite"
+    Hard Coal:     "Fossil Hard coal"
+    CCGT:          "Fossil Gas"
+    OCGT:          "Fossil Gas"
+    Steam Turbine: "Fossil Gas"
+    Oil:           "Fossil Oil"
+    Bioenergy:     "Biomass"
+    Waste:         "Waste"
+
+# Operating reserve demand curve.
+#
+# THIS IS A CALIBRATED BEHAVIOURAL MECHANISM, NOT A FUNDAMENTAL ONE. Say so in
+# any write-up.
+#
+# Cost-based LP dispatch prices energy at the marginal unit's short-run cost.
+# That reproduced the bottom three quartiles of the 2025 price distribution
+# and none of the top: modelled prices stopped near 127 EUR/MWh, one CCGT's
+# SRMC, in a month whose 99th percentile was 314. Real markets pay for
+# headroom long before they run out of plant - reserve procurement, risk
+# premium in the offer, and the plain fact that the last MWh in a tight hour
+# is bid rather than costed.
+#
+# The requirement is a share of load plus a share of variable renewable
+# output, which is how TSOs actually size reserve: wind and solar forecast
+# error is the thing being covered. The tiers are the demand curve - the
+# system can fall short of its reserve target, at a rising price, and the
+# shadow price of that constraint is added to the energy price.
+#
+# Three numbers, set on 2025. They must be validated on 2024 unchanged.
+# Operating reserve demand curve.
+#
+# The FORMULATION is PyPSA-Eur's, not invented here. config.default.yaml:
+#
+#   electricity:
+#     operational_reserve:
+#       activate: false
+#       epsilon_load: 0.02
+#       epsilon_vres: 0.02
+#       contingency: 4000
+#
+#   rhs = EPSILON_LOAD * demand + EPSILON_VRES * potential + CONTINGENCY
+#
+# The volumes below are those published defaults. Using them rather than a
+# fitted share_of_load removes one calibrated number from the model and
+# replaces it with a citable one - and the contingency term, which this model
+# did not have, is the physically meaningful part: the reserve a system holds
+# against losing its largest unit does not scale with the size of the zone.
+# That matters most in the small zones, where a flat 4 GW is a far bigger
+# share of load than it is in Germany.
+#
+# TWO DELIBERATE DEPARTURES from PyPSA-Eur, both of which change results:
+#
+# 1. PER ZONE, NOT SYSTEM-WIDE. PyPSA-Eur sums reserve over every generator in
+#    Europe and writes one constraint, so its shadow price is a single number
+#    added to every zone at once - which cancels exactly in a price spread.
+#    European reserve is procured per control area, and a zonal price model
+#    needs the zonal scope or the mechanism cannot separate two zones.
+#
+# 2. A SHORTFALL PRICE LADDER. PyPSA-Eur's reserve is a hard constraint with
+#    no slack: it withholds capacity but cannot price scarcity, and goes
+#    infeasible rather than expensive when it cannot be met. The tiers below
+#    let the system fall short at a rising price, and the dual of that is what
+#    lifts the energy price above the marginal unit's cost. THIS is the
+#    calibrated behavioural piece of the model - the volumes above are not.
+# scarcity_multiplier scales the whole requirement below. Swept over 1 to 6 by
+# scripts/19_tune_reserve.py against all fifteen criteria:
+#
+#   x1  5/15   level -22.2%   DE-FR sd 0.87   corr 0.41 / 0.31
+#   x2  5/15   level -21.7%   DE-FR sd 0.88   corr 0.42 / 0.30
+#   x3  7/15   level -20.6%   DE-FR sd 0.90   corr 0.43 / 0.29
+#   x4  7/15   level -18.5%   DE-FR sd 0.92   corr 0.44 / 0.31
+#   x6  7/15   level -12.3%   DE-FR sd 0.96   corr 0.44 / 0.32  <- breaks DE-PL mean
+#
+# Three findings, in order of importance:
+#
+# 1. THE HOURLY CORRELATIONS DO NOT MOVE. 0.41 -> 0.44 across a sixfold change.
+#    The hypothesis that price level, missing tail and weak hour-by-hour timing
+#    were one defect - because reversal hours are tight hours - is refuted. The
+#    timing problem is separate and this mechanism does not touch it.
+# 2. The count tops out at 7/15 and stays there. Beyond x4 criteria trade: x6
+#    finally passes the German price level and breaks the DE-PL mean spread,
+#    which is one of the four the model currently gets right.
+# 3. x3 is taken over x4 on the same count, because it is a smaller departure
+#    from a defensible volume.
+#
+# AND THE CAVEAT THAT MATTERS: at x3 Germany holds 8.2 GW. Real German
+# procurement - FCR plus aFRR plus mFRR, positive direction - is nearer 4.5 to
+# 5 GW, about x2. So this is NOT a reserve volume. It is the scarcity-bidding
+# proxy again, landing in the same territory as the 9%-of-load figure used
+# before the PyPSA-Eur defaults were adopted. The epsilons below stay at their
+# published values so the provenance of the formulation remains visible, and
+# the multiplier carries the calibrated part explicitly rather than hiding it
+# inside them.
+# The multiplier is now TWO numbers and a fact, not eight free parameters.
+#
+# A single multiplier forces the same scarcity intensity on every zone, and at
+# x6 that broke the DE-PL mean spread: 8.3 GW of required headroom on a 23 GW
+# Polish system pushed Polish prices up faster than German ones, so Germany's
+# level only passed by wrecking a criterion that already passed.
+#
+# The split is institutional. Poland (2021), France (2017) and Belgium (2021)
+# operate capacity mechanisms; Germany, the Netherlands, Austria and Czechia do
+# not. A capacity market pays for firmness OUTSIDE the energy price, which is
+# precisely what suppresses scarcity rent within it. So zones with one should
+# bid scarcity less hard, and which zones those are is a matter of fact rather
+# than of fitting.
+#
+# Switzerland sits outside EU market coupling entirely and takes the lower
+# value, since its borders are NTC-based and it is the zone this model
+# represents least well.
+#
+# NOTE, stated in advance: France HAS a mechanism, so this rule pushes French
+# prices DOWN, and France is already the worst zone at -30%. If France gets
+# worse that is evidence its problem is nuclear cost or export limits rather
+# than scarcity - not a reason to exempt it.
+operating_reserve:
+  enabled: true
+  scarcity_multiplier:
+    default: 3.0           # no capacity mechanism: DE, NL, AT, CZ
+    capacity_market: 3.0   # PL, FR, BE, and CH by exception
+  capacity_market_zones: [PL, FR, BE, CH]
+  epsilon_load: 0.02       # PyPSA-Eur default
+  epsilon_vres: 0.02       # PyPSA-Eur default
+  # PyPSA-Eur's contingency is 4000 MW applied ONCE, system-wide - the loss of
+  # the largest unit anywhere in Europe. Moving their formulation to per-zone
+  # scope and keeping the constant applied it eight times over, which is a
+  # quarter of Germany's requirement and effectively ALL of Czechia's: 4,174
+  # MW against a 9 GW load, 46% of demand held as reserve. That is why the
+  # small zones overshot their price variance while Germany landed at 1.01.
+  #
+  # Per zone the parameter means the largest unit IN THAT ZONE. The fleet
+  # cannot supply it - powerplantmatching groups by station, so "Neurath" is
+  # 3,208 MW across five units and "Kozienice" 3,443 across ten; only French
+  # and Czech nuclear came through unit-level.
+  #
+  # These are therefore APPROXIMATE large-unit sizes for each system, not
+  # audited figures. Every one of these systems has a largest unit in the 1 GW
+  # class - nuclear 1.0 to 1.6 GW, the biggest lignite and hard coal blocks
+  # 0.85 to 1.1 - except Austria, which has nothing near it. The model's
+  # sensitivity to these is in the assumptions register; what matters is that
+  # they are 1 GW rather than 4, not that they are exact.
+  contingency_mw:
+    DE_LU: 1100
+    FR:    1600            # Flamanville 3 is the largest unit in Europe
+    PL:     900
+    NL:     900
+    BE:    1000
+    AT:     400            # no large-unit class plant
+    CH:    1200
+    CZ:    1050
+  tiers:
+    - {share_of_requirement: 0.50, price: 30}
+    - {share_of_requirement: 0.30, price: 150}
+    - {share_of_requirement: 0.20, price: 600}
+
+
+# Negative bidding by subsidised renewables, EUR/MWh_e.
+#
+# The 2024 validation run found the model produced ZERO negative price hours
+# against 457 observed in Germany, 458 in the Netherlands and 404 in Belgium.
+# It was invisible until then because the whole model was calibrated on a
+# February fortnight that had none.
+#
+# The cause is structural, not a parameter. Nothing in the model has a negative
+# marginal cost, so when supply exceeds demand the optimiser curtails wind and
+# solar at zero cost and the price floor is zero. Real markets go below zero
+# because subsidised plant will PAY to keep running: a feed-in premium is lost
+# on every curtailed MWh, PPAs and green certificates settle on output, and CHP
+# has a heat obligation. Curtailment is more expensive than dumping power, so
+# the offer goes negative.
+#
+# These are offer prices, not costs. The number is roughly what a generator
+# forgoes per MWh curtailed: the German market premium averaged in the low tens
+# of EUR/MWh over this period, and older feed-in-tariff plant forgoes more than
+# newer merchant-exposed plant. Offshore wind sits deeper than onshore because
+# a larger share of the fleet is on legacy support.
+#
+# This is validated on a COUNT, not on a price: negative hours per zone per
+# year, which is checkable against the published series. If the count comes out
+# right and the price distribution does not, the mechanism is right and
+# something else is wrong.
+negative_bidding:
+  Wind Offshore: -22.0
+  Wind Onshore:  -15.0
+  Solar:          -8.0     # newer, more merchant-exposed, less legacy support
+# Bioenergy is NOT listed, deliberately. It bids negative in reality, but it
+# enters this model through the thermal fleet rather than the capacity-factor
+# block, so an entry here would be read and silently ignored. A parameter that
+# does nothing is worse than an absent one - it looks like the mechanism is
+# covered when it is not. Its must_run share of 0.70 already keeps it running
+# through the trough; giving it a negative offer would need the same treatment
+# in marginal_costs().
+
+
+# What the unmodelled generation bids, per zone.
+#
+# The correction in unmodelled_generation() was first added at zero marginal cost -
+# must-take, but not paying to run - and the Netherlands then produced 6
+# negative price hours against an observed 458. That was wrong: the Dutch gap
+# is overwhelmingly rooftop PV, which is exactly the plant that drives Dutch
+# prices below zero, and it should bid like the solar it is.
+#
+# Switzerland's gap is small hydro, which spills rather than pays to run, so it
+# stays at zero. Same correction, different physics, different bid.
+# TESTED AND REJECTED: NL at -8.0, matching the Solar offer above.
+#
+# The shape decomposition is sound - Dutch "Other" splits into a ~2,000 MW
+# floor that runs all night and a ~2,200 MW diurnal bulge, against roughly
+# 2,750 MW for the whole Dutch PV fleet on an annual mean - so the volume
+# attributed to solar is right, or conservative.
+#
+# But at -8.0 Dutch negative hours went to 971 against an observed 458, and
+# dragged every neighbour with them: Germany 572 -> 795, Poland 396 -> 488,
+# Belgium 346 -> 644. The error is treating this plant as a market
+# participant. Dutch rooftop PV under net metering has no offer curve - it
+# displaces residual demand rather than setting a price. German utility-scale
+# solar, where the -8.0 was calibrated, is merchant-exposed with a market
+# premium and genuinely does bid. Same technology, different market role.
+#
+# At zero it is inframarginal: it runs, it depresses the residual load, and it
+# never sets the clearing price. Dutch negative hours then come out at 297
+# against 458 - UNDER-predicted, and left that way rather than fitted, because
+# the count is this mechanism's only independent check and tuning a parameter
+# to hit it would destroy the evidence.
+# Zero was wrong in the other direction: it left the Netherlands with NO
+# negative-bidding generation at all - 0 hours against 458 - because the
+# published NL|Solar series is 58 MW and every real Dutch panel is inside this
+# correction. Both extremes have now been measured: -8.0 gives 971 hours, 0.0
+# gives none.
+#
+# The Dutch PV fleet is roughly half net-metered rooftop, which has no offer
+# curve and cannot set a price, and half commercial and utility-scale under
+# SDE++, which is merchant-exposed and bids like German solar does. Half of
+# the -8.0 offer reflects that mix. It is a judgement about market structure,
+# not a value chosen to hit 458 - and the count remains the check, reported
+# wherever it lands.
+unmodelled_bid:
+  NL: -8.0                 # the offer of the half that DOES bid - German solar's
+  CH:  0.0                 # small hydro - spills, does not pay to run
+
+# What SHARE of the variable part offers into the auction at all.
+#
+# -8.0 gave 971 negative hours against 458; 0.0 gave none; -4.0 gave 971 again,
+# identically. The count does not respond to offer depth because an hour clears
+# below zero when a negative bidder is MARGINAL, not when it offers deeply -
+# the same thing Poland's CfD scaling demonstrated earlier.
+#
+# So the mix is expressed where it belongs: roughly half the Dutch PV fleet is
+# net-metered rooftop with no offer curve, and half is commercial and
+# utility-scale under SDE++ that bids like German solar. Half the megawatts
+# offer at -8; the rest are inframarginal at zero.
+unmodelled_bidding_share:
+  NL: 0.5
+
+# Where the unmodelled generation borrows its hourly shape.
+#
+# This applies ONLY to the part nobody published. Output published under a
+# type the model does not build - 4.4 GW of Dutch "Other" - carries its own
+# real hourly profile and borrows nothing.
+#
+# The measured monthly ENERGY is the zone's own; only the within-month shape
+# comes from elsewhere. The Netherlands takes Belgian solar - adjacent, near
+# identical latitude, and the same weather system - because the Dutch series
+# does not exist to take it from. Switzerland has no entry: its gap is small
+# hydro, which has no diurnal signature worth borrowing, so the typical-day
+# profile is right for it.
+unmodelled_shape:
+  NL: "BE|Solar"
+
+
+# Per-zone scaling of the negative bids above.
+#
+# Support schemes are national, so how deep a renewable will bid below zero is
+# a policy question rather than a technology one. The bids above are calibrated
+# on Germany, where they land: 572 modelled negative hours against 457 observed
+# in 2024.
+#
+# Poland came out at 396 against 197 - more than double. Polish renewables sit
+# under CfD contracts whose support is suspended during negative price periods,
+# following the EU market design reform. A Polish wind farm that loses its
+# contract-for-difference payment in exactly those hours has little reason to
+# pay to keep running, so it bids near zero rather than deeply negative.
+#
+# One number per zone, and only where the count says it is needed. The check
+# stays the same: negative hours per zone per year against the published
+# series, which is not what the model is validated on.
+# REMOVED. PL was set to 0.25 on the CfD argument above, and the count did not
+# move: 396 negative hours before and after. With DE-PL congested in 0.1% of
+# hours, Poland's price IS Germany's price, so Poland's negative hours are
+# inherited rather than generated domestically and its own bid depth changes
+# how far below zero the price goes, not whether the hour is negative.
+#
+# The policy argument may well be right. It is simply not testable this way,
+# and a parameter that cannot be checked should not be carried.
+negative_bidding_scale: {}
+
+# Share of each zone's renewable CAPACITY that is paid to run, and therefore
+# bids below zero. The remainder is built as a second generator on the same bus
+# with the same carrier and the same hourly profile, bidding 0.0 - a plant with
+# no premium to lose curtails at zero rather than paying to generate.
+#
+# Why a volume share and not a shallower bid
+# ------------------------------------------
+# Measured, not assumed: setting the Dutch bid to -4 instead of -8 gave an
+# IDENTICAL negative-hour count. The count is a step function of whether
+# anything at all bids below zero; only the volume below zero moves it. Bid
+# depth sets how far below zero the price goes, which is a different criterion.
+# This is the same mistake that made negative_bidding_scale untestable, above.
+#
+# Source for Germany - a published capacity split, not a fitted number
+# --------------------------------------------------------------------
+# FfE, October 2024: 70.2 GW of PV (75.4% of installed PV) and 47.7 GW of wind
+# (66.5% of installed wind) hold a fixed feed-in tariff or an unrestricted
+# market premium, and so have no incentive to stop at a negative price. The
+# remainder sits under the EEG section 51 hourly rule - 6 consecutive negative
+# hours from 2016, 4 from 2021, tightening toward 1 by 2027, and only ever
+# binding on plant commissioned after each amendment - or is merchant/PPA.
+# https://www.ffe.de/en/publications/negative-electricity-prices-how-many-renewable-energy-systems-will-run-through/
+#
+# The section 51 rule is a rule about CONSECUTIVE hours, so the true behaviour
+# is time-dependent: an affected plant still bids negative for the first hours
+# of a streak and stops after. A static share cannot represent that. It is used
+# here as an annual volume proxy, which is the level the negative-hour COUNT
+# criterion tests, and it is stated plainly as an approximation.
+#
+# Wind offshore carries the same 0.665 as onshore because the FfE figure is for
+# wind as a whole. Offshore is probably subsidised at a higher rate, but
+# splitting one published number into two invented ones is fitting.
+#
+# Every other zone stays at 1.0 - not because their fleets are fully
+# subsidised, but because no equivalent published capacity split was found for
+# them, and a share with no source is a free parameter. Poland is the case that
+# most obviously needs one; see negative_bidding_scale above for why its own
+# bid cannot be tested, and note that with DE-PL congested in 0.1% of hours the
+# Polish count is largely inherited from the German one. If this change moves
+# Poland's count without touching a Polish parameter, that inheritance is
+# confirmed.
+#
+# RESULT: REFUTED AND REVERTED (2024 hold-out, run 2026-09-05)
+# ------------------------------------------------------------
+# Set to DE_LU {Solar: 0.754, Wind Onshore: 0.665, Wind Offshore: 0.665} from
+# the FfE split above - 129,743 MW bidding below zero, 51,436 MW at zero. The
+# mechanism worked and the parameter is wrong, in a way that is worth keeping.
+#
+# German negative hours went 596 -> 61 against 457 observed. An overshoot of
+# four times the error it was meant to remove. But the damage was not German:
+#
+#   zone   before/actual   after/actual
+#   DE_LU     596/457         61/457
+#   FR        325/352         67/352      <- was nearly right
+#   PL        411/197        168/197      <- the only improvement
+#   NL        420/458         65/458      <- was nearly right
+#   BE        431/404        162/404      <- was nearly right
+#   AT        276/296         56/296      <- was nearly right
+#   CZ        279/315         55/315      <- was nearly right
+#
+# Six zones whose parameters were NOT touched moved, five of them from close to
+# badly wrong. Changing 51 GW of German bids from -8/-15 to 0 raised the price
+# floor of the entire coupled region, because in surplus hours the German
+# zero-bid block is the marginal unit everywhere. The note under
+# negative_bidding_scale said this about Poland; it is true of all of CORE.
+#
+# WHY THE PARAMETER IS WRONG, specifically: the FfE complement is capacity with
+# a section 51 restriction, not capacity that bids zero. Section 51 binds only
+# after 4 (or 6) CONSECUTIVE negative hours, and most negative episodes are
+# short midday solar peaks that never reach the threshold - so in a typical
+# episode almost the whole German fleet still bids negative. A static share
+# treats the restricted cohort as never bidding negative, which is the wrong
+# limit of a rule that usually does not bind. The genuinely never-subsidised
+# fleet - past its 20-year term, merchant or PPA - is far smaller than 25-33%.
+#
+# It was also chasing the wrong target. The negative-hour count is a
+# DIAGNOSTIC, not one of the fifteen criteria. This change bought a diagnostic
+# in one zone and cost a criterion-relevant metric: DE-FR sign agreement in the
+# negative direction fell 10% -> 3% (supplementary 10% -> 4%), because a
+# Germany that is rarely negative is rarely below France.
+#
+# Representing section 51 honestly needs a two-pass solve - solve, find the
+# negative streaks, set the restricted capacity to bid zero only in hours past
+# the threshold, re-solve to a fixed point. That is the correct fix and it is
+# not worth its complexity for a non-criterion diagnostic. Left here for
+# package D if the count ever becomes binding.
+#
+# Reverted to empty. The MECHANISM is kept: it is correct, costs nothing when
+# unused, and is the only way to move a negative-hour count at all.
+negative_bidding_share: {}

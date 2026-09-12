@@ -1,0 +1,116 @@
+# Scope for the DE-FR / DE-PL spread driver study.
+#
+# Pull everything available, then use the years for different jobs:
+#   2025  calibration year - complete, most current fleet. Day-ahead prices are
+#         quarter-hourly from 1 Oct 2025 (SDAC 15-minute MTU go-live) and get
+#         averaged to hourly in the processing step.
+#   2024  out-of-sample check. Natively hourly throughout, and close enough to
+#         2025 in fleet terms that only the capacity register changes - so the
+#         model really is being run unchanged.
+#   2026  partial year. Not a base year, but the most current capacity register
+#         and outage records, and a check that the calibration still holds.
+#
+# 2023 is deliberately excluded: German nuclear was still running until April
+# 2023 and French nuclear was still recovering from the stress-corrosion
+# outages, so validating on it would mean rebuilding the fleet rather than
+# rerunning the same model. The puller is restartable, so backfilling 2023
+# later is one date change and a re-run.
+
+period:
+  start: "2024-01-01"
+  end:   "2026-09-01"     # exclusive
+
+years:
+  calibration: 2025
+  validation: [2024]
+
+# Day-ahead prices switched from hourly to quarter-hourly MTU on this date.
+mtu_switch: "2025-10-01"
+
+# Endogenous bidding zones - modelled explicitly, prices solved for.
+zones:
+  - DE_LU
+  - FR
+  - PL
+  - NL
+  - BE
+  - AT
+  - CH
+  - CZ
+
+# Borders between endogenous zones. Become PyPSA Links.
+borders_internal:
+  - DE_LU>FR
+  - DE_LU>NL
+  - DE_LU>BE
+  - DE_LU>AT
+  - DE_LU>CH
+  - DE_LU>CZ
+  - DE_LU>PL
+  - FR>BE
+  - FR>CH
+  - NL>BE
+  - AT>CZ
+  - AT>CH
+  - CZ>PL
+
+# Borders to the rest of Europe. Fixed to historical net flow in v1.
+borders_external:
+  - DE_LU>DK_1
+  - DE_LU>DK_2
+  - DE_LU>SE_4
+  - DE_LU>NO_2
+  - FR>GB
+  - FR>ES
+  - FR>IT_NORD
+  - NL>GB
+  - NL>DK_1
+  - NL>NO_2
+  - BE>GB
+  - PL>SK
+  - PL>LT
+  - PL>SE_4
+  - AT>IT_NORD
+  - AT>HU
+  - AT>SI
+  - CZ>SK
+  - CH>IT_NORD
+
+
+# Which exchange series sizes the links and the net-position bounds.
+#
+#   commercial - day-ahead SCHEDULED COMMERCIAL EXCHANGE. What the auction
+#                allocated across that border.
+#   physical   - what crossed the wire.
+#
+# These are not the same, and scripts/16_commercial_vs_physical.py measures the
+# gap. On CZ-PL commercial exchange averages HALF the physical flow; on DE-AT
+# it is 1.30 times it. One picture explains both: trade scheduled from Germany
+# into Austria and Switzerland physically routes north-to-south through Poland
+# and Czechia, so the CZ-PL wire carries twice the power ever sold across it
+# while the DE-AT wire carries less. That is the Central European loop-flow
+# problem, and it is why both countries installed phase shifters.
+#
+# "commercial" is correct in principle regardless of the size of the gap: a
+# market-coupling model should be bounded by what the market coupling had to
+# allocate. Physical flow is an outcome of the whole European grid, most of it
+# decided by trades on other borders entirely.
+capacity_source: commercial
+
+
+# Zones outside EU day-ahead market coupling (SDAC).
+#
+# Switzerland has been excluded from SDAC since the framework-agreement
+# dispute, so its cross-border trade is bilateral and NTC-based rather than
+# auction-allocated, and a large share of what crosses its borders is transit
+# it never traded. Its scheduled commercial exchange therefore understates its
+# borders by more than a gigawatt: sizing FR-CH and AT-CH from the commercial
+# series congested them 44% and 39% of hours against an observed 7% and 6%,
+# and made the model shed Swiss load at VOLL.
+#
+# Borders touching a zone on this list are sized from PHYSICAL flow instead.
+# Everywhere else the commercial series is right, and demonstrably so - it
+# recovered Alegro's 1,000 MW rating on DE-BE to the megawatt, along with an
+# observed 50% congestion rate that matches how that link actually runs.
+outside_market_coupling:
+  - CH
