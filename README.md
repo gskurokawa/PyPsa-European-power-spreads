@@ -45,19 +45,51 @@ pip install -r requirements.txt
 copy .env.example .env        # then paste your ENTSO-E token into .env
 ```
 
+Check the token works, then run the pipeline:
+
 ```
-python scripts/01_pull_entsoe.py --test    # check the token works
-python scripts/01_pull_entsoe.py           # pull everything (restartable)
-python scripts/10_build_network.py --year 2025 --chunk-days 30 --bid-ladder 20
+python scripts/pipeline/01_pull_entsoe.py --test
+python run_pipeline.py --year 2025
+```
+
+`run_pipeline.py` runs the sixteen stages in order — pull the raw data, build
+the fleet and fuel prices, assemble the flow-based domain, then build and solve
+the model — and stops at the first failure, so a half-built set of inputs is
+never passed to the next stage.
+
+```
+python run_pipeline.py --list              what the stages are
+python run_pipeline.py --year 2025 --from 10   skip the data pull
+python run_pipeline.py --dry-run           print the commands, run nothing
+```
+
+The first run takes hours, almost all of it the ENTSO-E pull, which is cached
+per dataset and month and can be interrupted and resumed.
+
+To build one version of the model on its own:
+
+```
+python scripts/pipeline/10_build_network.py --year 2025 --chunk-days 30 --bid-ladder 20
 ```
 
 Add `--flow-based` for the CNEC model or `--max-net-pos` for the maxNetPos
 model; omit both for the NTC model. `run_shocks.py` drives the full perturbation
 experiment.
 
+## Layout
+
+```
+run_pipeline.py        the stages, in order
+run_shocks.py          the perturbation experiment
+src/spread/            the library: network construction, processing, validation
+scripts/pipeline/      the stages themselves, numbered in execution order
+scripts/analysis/      the analyses behind the numbers in RESULTS.md
+scripts/diagnostics/   one-off checks kept as an audit trail; not needed to reproduce
+config/                fleet, technology and zone configuration
+```
+
 Nothing under `data/` is committed — every input is public and is rebuilt by the
-scripts. The raw flow-based domain alone is about 120 MB a year. Raw pulls are
-cached per dataset and month, so an interrupted pull only needs running again.
+scripts. The raw flow-based domain alone is about 120 MB a year.
 
 All timestamps are stored in UTC; conversion to market time happens once, in
 processing.
