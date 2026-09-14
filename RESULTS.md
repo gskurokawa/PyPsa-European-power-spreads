@@ -895,7 +895,7 @@ the year, is the version that would blow up the computational requirement, since
 a seasonal reservoir cycles once a year and cannot be represented inside a
 30-day block at all. That would require the whole year to be solved as a single
 problem, which is roughly twelve times the size of the largest problem solved
-here.
+here. There is a way to solve this with low compute, which is to adopt a Plexos-style sequential optimization: divide the year into e.g. months and then optimize over 12 months - treating each of the days within a month as a monolith - and then solve for the days within each month. However, this would complicate Monte Carlo experiments of the type in this study.
 
 *More countries and more years.* Eight zones and two years is the smallest
 credible version of this experiment. Extending the footprint would test whether
