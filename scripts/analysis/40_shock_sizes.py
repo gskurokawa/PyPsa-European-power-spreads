@@ -1,8 +1,8 @@
 """Record how big each driver shock ACTUALLY was, and where the size came from.
 
-    python scripts/40_shock_sizes.py
+    python scripts/analysis/40_shock_sizes.py
 
-Writes logs/shock_sizes.json for scripts/38_shock_analysis.py.
+Writes logs/shock_sizes.json for scripts/analysis/38_shock_analysis.py.
 
 WHY THIS IS NOT A VARIANCE DECOMPOSITION
 ----------------------------------------

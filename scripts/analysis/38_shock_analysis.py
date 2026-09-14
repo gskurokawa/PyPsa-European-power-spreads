@@ -1,6 +1,6 @@
 """The section 13 result: how differently do the two arms respond to a shock?
 
-    python scripts/38_shock_analysis.py
+    python scripts/analysis/38_shock_analysis.py
 
 Reads the eighteen runs and writes logs/shock_analysis.txt.
 
@@ -243,7 +243,7 @@ try:
 except Exception:                                             # noqa: BLE001
     pass
 if not SIZES:
-    out("  logs/shock_sizes.json not present - run scripts/40_shock_sizes.py")
+    out("  logs/shock_sizes.json not present - run scripts/analysis/40_shock_sizes.py")
 else:
     for bname in BORDERS:
         out(f"\n  {bname}")

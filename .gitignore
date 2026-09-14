@@ -28,7 +28,11 @@ data/fleet/
 *.parquet
 
 # ---- run output -----------------------------------------------------------
+# logs/ is the per-run output of 10_build_network.py. The *.log rule catches
+# redirected console output such as mc_run.log, which run_mc.py can produce at
+# several MB a batch.
 logs/
+*.log
 
 # ---- superseded working document ------------------------------------------
 # RESULTS.md is the paper. FINDINGS.md is the older working draft it replaced.

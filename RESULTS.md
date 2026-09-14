@@ -13,10 +13,10 @@ depends significantly on recalculating hourly. None is
 better at picking which particular hours are congested; all three are modest.
 
 German and French prices actually differed in 86% of the hours of 2025. The CNEC
-model reproduces that closely, at 84%. The NTC model reaches only 53%: in the
-other hours it gives the two countries an identical price, so the spread it
-reports there is zero. Between Germany and Poland
-all three models give much the same answer. All three take the same time to
+model reproduces that closely, at 84%. The NTC model reaches only 53%, so in the remaining
+47% of hours it gives the two countries the same price and reports no spread
+at all. Between Germany and Poland all three models give much the same
+answer. All three take the same time to
 solve; the CNEC model uses 2.7 times the memory.
 
 *Data.* All inputs are public: EEX auction reports, futures settlements and the
@@ -49,15 +49,36 @@ in §4:
 2. *Sensitivity.* Under identical perturbations to the gas price and the
    carbon price, do the three models give the same response?
 
+*Relation to existing work.* Comparing transmission representations inside one
+model is not new: Gunkel et al. (2020) set a flow-based representation against
+net transfer capacities in the Balmorel model and found that flow-based
+modelling flattens prices across space, while noting that the spatial clustering
+their model required left the size of the difference uncertain. Most such work
+constructs its own flow-based domain, and the construction is not neutral —
+Schönheit et al. (2021) show that the choice of monitored network elements and
+the size of the reliability margin change the resulting domain more than the
+generation shift keys do, and Weinhold (2021) builds a domain precisely in order
+to test one of its policy parameters. A comparison resting on a constructed
+domain therefore mixes the effect of the representation with the effect of the
+assumptions behind it. A separate, empirical literature measures what flow-based
+allocation did to the market rather than to a model; Ovaere et al. (2023) find
+that cross-border exchange volumes and price convergence both rose after the
+2015 go-live in Central Western Europe. This study instead takes JAO's published
+hourly domain as given, imposes it and the two alternatives on an otherwise
+identical model built in PyPSA (Brown et al., 2018), and compares three
+representations rather than two — which separates two features that a straight
+flow-based-against-NTC test holds together: whether the limit is recomputed
+every hour, and whether it is written on a zone or on a network element.
+
 ---
 
 ## 2. Price formation in the model
 
 Every power generator offers at short-run marginal cost:
 
-```
-SRMC  =  fuel / efficiency  +  CO2 price x emissions / efficiency  +  VOM
-```
+$$\text{SRMC} \;=\; \frac{\text{fuel}}{\eta} \;+\; \frac{p_{\mathrm{CO_2}} \cdot \varepsilon}{\eta} \;+\; \text{VOM}$$
+
+with $\eta$ the thermal efficiency, $p_{\mathrm{CO_2}}$ the carbon price and $\varepsilon$ the emissions intensity of the fuel.
 
 Nuclear offers €27.18/MWh, lignite around €75, a mid-efficiency CCGT around €85.
 The plant where cumulative capacity meets demand sets the price.
@@ -66,9 +87,7 @@ In the linear program the price is the *dual variable*. Two zones joined by an u
 same dual, because the optimiser moves power until they do. When a transmission
 constraint binds, its own dual is the price difference:
 
-```
-mu(constraint)  =  price(importing zone) - price(exporting zone)
-```
+$$\mu_{\text{constraint}} \;=\; \lambda_{\text{importing}} \;-\; \lambda_{\text{exporting}}$$
 
 ---
 
@@ -83,40 +102,55 @@ mu(constraint)  =  price(importing zone) - price(exporting zone)
 | Problem size | 8 buses, 957 generators, 13 links, 16 loads |
 | Solver | HiGHS dual simplex, via linopy and PyPSA; the year solved in 30-day blocks |
 
+*Why these eight.* Seven of them — DE_LU, FR, PL, NL, BE, AT and CZ — are Core
+zones, so their borders are the ones the published flow-based domain actually
+constrains, which is what this study tests. Switzerland is not a Core member and
+its borders are not allocated flow-based, but it is included because it sits in
+the middle of the synchronous area and carries a large share of the transit
+between its neighbours; leaving it out would push that flow onto a frozen
+external border where it could not respond to anything. The five remaining Core
+zones — Croatia, Hungary, Romania, Slovakia and Slovenia — are peripheral to the
+borders under test, and enter instead through their observed net positions, as
+§4.3 describes. Eight zones is also what keeps the flow-based model inside the
+memory of a single desktop machine.
+
 The 865 thermal units are grouped into 115 blocks for calculations: units in the same zone, technology and efficiency band have
 almost the same marginal cost, so the optimiser does not need them separately.
 Availability is still tracked unit by unit.
 
-Reservoir hydro, pumped storage and batteries enter as fixed hourly generation
-profiles taken from observed output. They are not optimised, and therefore never
-set a price. This is a simplifying assumption; otherwise, optimisation will take far longer and require much more computing resources.
+Reservoir hydro and pumped storage enter as fixed hourly generation profiles
+taken from observed output, at zero marginal cost. They are not optimised, and
+therefore never set a price. For pumped storage only the generation is included;
+the consumption while pumping is not, so the model holds a small quantity of
+energy that was never bought. Batteries are absent altogether, since installed
+capacity and storage duration are not published on the same basis as the rest of
+the fleet. These are simplifying assumptions. Optimising storage would require
+each hour to be solved together with the hours around it, which is far more
+expensive than solving them separately, and §10 sets out what it would cost and
+what it would change.
 
 ### 3.1 The optimisation problem
 
 All three models are the same linear program and differ only in
 constraints.
 
-Indices: zones `z`, snapshots `t`, generators `i`, links `l`. A link has an
+Indices: zones $z$, snapshots $t$, generators $i$, links $l$. A link has an
 orientation, and its flow may take either sign.
 
-*Decision variables.* Generation `g(i,t) >= 0` for each generator and snapshot,
-and flow `f(l,t)` for each link and snapshot.
+*Decision variables.* Generation $g_{i,t} \ge 0$ for each generator and snapshot,
+and flow $f_{l,t}$ for each link and snapshot.
 
-*Objective.* Minimise total generation cost, with `c(i,t)` the short-run
+*Objective.* Minimise total generation cost, with $c_{i,t}$ the short-run
 marginal cost of §2:
 
-```
-minimise   SUM over i, t of   c(i,t) * g(i,t)
-```
+$$\min \sum_{i}\sum_{t} c_{i,t}\, g_{i,t}$$
 
 *Constraints common to all three models.* For every zone and snapshot, the
-energy balance, whose dual variable `lambda(z,t)` is the zonal price:
+energy balance, whose dual variable $\lambda_{z,t}$ is the zonal price:
 
-```
-SUM of g(i,t) for generators i in z
-  + SUM of f(l,t) for links l entering z
-  - SUM of f(l,t) for links l leaving z          =   demand(z,t)
-```
+$$\sum_{i \in z} g_{i,t} \;+\; \sum_{l \,\to\, z} f_{l,t} \;-\; \sum_{l \,\leftarrow\, z} f_{l,t} \;=\; d_{z,t}$$
+
+where $l \to z$ are the links entering zone $z$ and $l \leftarrow z$ those leaving it.
 
 For every generator and snapshot, an availability limit; for every link and
 snapshot, a rating derived from the preceding week of scheduled exchange
@@ -125,20 +159,15 @@ snapshot, a rating derived from the preceding week of scheduled exchange
 *The quantity the models constrain.* A zone's net position is its exports
 less its imports across the links it holds:
 
-```
-NP(z,t)  =  SUM of f(l,t) for links leaving z
-          - SUM of f(l,t) for links entering z
-```
+$$NP_{z,t} \;=\; \sum_{l \,\leftarrow\, z} f_{l,t} \;-\; \sum_{l \,\to\, z} f_{l,t}$$
 
 and its *Core* net position counts only links whose other end is a Core zone,
-adding `x(z,t)`, the observed exchange with the five Core zones the model does
+adding $x_{z,t}$, the observed exchange with the five Core zones the model does
 not represent:
 
-```
-NPcore(z,t)  =  SUM of f(l,t) for links leaving z to a Core zone
-              - SUM of f(l,t) for links entering z from a Core zone
-              + x(z,t)
-```
+$$NP^{\text{core}}_{z,t} \;=\; \sum_{l \,\leftarrow\, z,\; l \in C} f_{l,t} \;-\; \sum_{l \,\to\, z,\; l \in C} f_{l,t} \;+\; x_{z,t}$$
+
+where $C$ is the set of links whose other end is a Core zone.
 
 
 ---
@@ -172,10 +201,7 @@ between the forecast used in that simulation and what actually occurs. It is a s
 — yearly and monthly products bought before the day-ahead auction opens — and so
 no longer available to it. Traders will use however much of it they want. Unallocated capacity, the leftover, is never used.
 
-```
-NTC = TTC - TRM
-ATC = NTC - AAC
-```
+$$NTC = TTC - TRM \qquad\qquad ATC = NTC - AAC$$
 
 *Available Transfer Capacity (ATC)* is what the day-ahead auction can actually
 use.
@@ -255,12 +281,10 @@ across all of its borders in the hour.
 
 In the notation of §3.1, the constraint added is
 
-```
-NPlo(z)  <=  NP(z,t)  <=  NPhi(z)        for every zone z and snapshot t
-```
+$$NP^{\text{lo}}_{z} \;\le\; NP_{z,t} \;\le\; NP^{\text{hi}}_{z} \qquad \forall\, z,\; \forall\, t$$
 
-with `NPlo` and `NPhi` taken from the table above. Two rows per zone per
-snapshot, sixteen in all, and the bounds have no `t` — the same pair applies in
+with $NP^{\text{lo}}$ and $NP^{\text{hi}}$ taken from the table above. Two rows per zone per
+snapshot, sixteen in all, and the bounds have no $t$ — the same pair applies in
 all 8,760 hours of the year.
 
 Each link keeps its own rating, so no single border is made artificially tight.
@@ -269,8 +293,8 @@ another: Germany may send 5,000 MW to France, but every megawatt sent there is
 one it cannot also send to Austria.
 
 That coupling is also a limit inherent to the model. If the bound on
-`z` is the only binding constraint in an hour, the dual on it is the value of
-one further megawatt of export from `z` *whichever border carries it*, so `z`
+$z$ is the only binding constraint in an hour, the dual on it is the value of
+one further megawatt of export from $z$ *whichever border carries it*, so $z$
 is separated from every neighbour it supplies by the same amount. Borders of the
 same zone can be separated by different amounts only when a neighbour's own
 bound binds, or a link reaches its rating. A single limit per zone cannot
@@ -304,20 +328,18 @@ expect on it before the auction clears given forecast generation, load and
 already-scheduled exchange; and a *reliability margin* covering the difference
 between that forecast and what actually occurs.
 
-```
-RAM  =  thermal rating  -  reference flow  -  reliability margin
-```
+$$RAM \;=\; F^{\max} \;-\; F_{0} \;-\; FRM$$
+
+with $F^{\max}$ the thermal rating, $F_{0}$ the reference flow and $FRM$ the flow reliability margin.
 
 In the notation of §3.1, the constraint is
 
-```
-SUM over Core zones z of  PTDF(z,e,t) * NPcore(z,t)   <=   RAM(e,t) + s(e,t)
-```
+$$\sum_{z \in \text{Core}} PTDF_{z,e,t}\; NP^{\text{core}}_{z,t} \;\le\; RAM_{e,t} + s_{e,t} \qquad \forall\, e,\; \forall\, t, \qquad s_{e,t} \ge 0$$
 
-for every monitored element `e` and every snapshot `t`, where `s(e,t) >= 0` is
+for every monitored element $e$ and every snapshot $t$, where $s_{e,t} \ge 0$ is
 the slack variable described below. Five Core zones are unrepresented in the
 model (Croatia, Hungary, Romania, Slovakia, Slovenia); their contribution
-enters through `x(z,t)` inside `NPcore`.
+enters through $x_{z,t}$ inside $NP^{\text{core}}$.
 
 ### 4.4 The maxNetPos model
 
@@ -332,12 +354,10 @@ constraining individual elements alone.
 The constraint has the same form as §4.2 but is written on the Core net
 position and has a right-hand side that varies by snapshot:
 
-```
-NPmin(z,t)  <=  NPcore(z,t)  <=  NPmax(z,t)      for z in Core, every t
-```
+$$NP^{\min}_{z,t} \;\le\; NP^{\text{core}}_{z,t} \;\le\; NP^{\max}_{z,t} \qquad \forall\, z \in \text{Core},\; \forall\, t$$
 
-where `NPmin` and `NPmax` are JAO's published minimum and maximum net position
-for zone `z` in hour `t`. The row count is unchanged from §4.2 — two per Core
+where $NP^{\min}$ and $NP^{\max}$ are JAO's published minimum and maximum net position
+for zone $z$ in hour $t$. The row count is unchanged from §4.2 — two per Core
 zone per snapshot, plus two for Switzerland — so the difference from the NTC
 model lies entirely in the right-hand side.
 
@@ -349,13 +369,13 @@ What differs is the constraint.
 
 | | NTC model | maxNetPos model | CNEC model |
 |---|---|---|---|
-| quantity bounded | `NP(z,t)`, a zone's total net position | `NPcore(z,t)`, its net position across Core borders | loading on one network element under one contingency |
-| coefficients in a row | 1 on `z`, zero on every other zone | 1 on `z`, zero on every other zone | a separate `PTDF(z,e,t)` on each of the seven modelled Core zones |
+| quantity bounded | $NP_{z,t}$, a zone's total net position | $NP^{\text{core}}_{z,t}$, its net position across Core borders | loading on one network element under one contingency |
+| coefficients in a row | 1 on $z$, zero on every other zone | 1 on $z$, zero on every other zone | a separate $PTDF_{z,e,t}$ on each of the seven modelled Core zones |
 | rows per snapshot | 16 | 16 | 105–140 |
 | rows per year | 140,160 | 140,160 | 1,151,640 (§8.4) |
 | right-hand side varies by hour | no | yes | yes |
 | right-hand side estimated here | yes | no | no |
-| source | 0.5th and 99.5th percentiles of the observed net position, × 1.05 | JAO `maxNetPos` | JAO `PTDF` and `RAM` |
+| source | 0.5th and 99.5th percentiles of the observed net position, × 1.05 | JAO `maxNetPos` | JAO $PTDF$ and $RAM$ |
 | Switzerland | bounded like any zone | estimated bound, being outside Core | estimated bound, being outside Core |
 | two borders of one zone separable by different amounts | no | no | yes |
 | slack variables | none | none | one per row, €5,000/MW |
@@ -385,7 +405,7 @@ evaluating on it would mix fleet change with model error.
 
 Downloaded data nuclear SRMCs have no variability, but this is unlikely to be true. The study assumes a nuclear operator holding capacity back for a more valuable hour will not offer it at fuel cost. So, while average costs may drop due to scale economies, marginal costs are assumed to rise. A rising offer curve approximates that, and the nuclear 'bid ladder' reflects that.
 
-An example with French nuclear. The value of `s` was chosen by running the model on 2024 at values from €0 to
+An example with French nuclear. The value of $s$ was chosen by running the model on 2024 at values from €0 to
 €40/MWh and comparing against the acceptance criteria. It was set to *€20/MWh* based on research.
 
 ### 5.2 How each parameter was set
@@ -489,6 +509,57 @@ DE–PL, DE–CZ and DE–NL the published hourly bound is no better than the
 estimated constant one and on two of the three slightly worse, while the CNEC
 model improves all of them by 20 to 65 points.
 
+*Separating as often as the market is not the same as separating in the same
+hours.* Every figure above counts hours; none of them asks whether the hours
+coincide. For that, take the two series as indicators — 1 in an hour where the
+border separated, 0 otherwise, one series for the model and one for the market —
+and correlate them. On binary data the Pearson correlation is the *phi
+coefficient*, computed from the four cell counts of the 2×2 table: $a$ hours
+where both separated, $b$ model only, $c$ market only, $d$ neither, summing
+to $N$.
+
+The derivation is short. Writing $X$ and $Y$ for the two indicators, $XY = 1$
+only when both are 1, so $E[XY] = a/N$, while $E[X] = (a+b)/N$ and
+$E[Y] = (a+c)/N$. Hence
+
+$$\operatorname{Cov}(X,Y) \;=\; \frac{a}{N} - \frac{(a+b)(a+c)}{N^{2}} \;=\; \frac{ad - bc}{N^{2}}$$
+
+the $a^{2}$, $ab$ and $ac$ terms cancelling. A 0/1 variable satisfies $X^{2} = X$,
+so $\operatorname{Var}(X) = E[X] - E[X]^{2} = (a+b)(c+d)/N^{2}$, and likewise
+$\operatorname{Var}(Y) = (a+c)(b+d)/N^{2}$. Dividing, the $N^{2}$ cancels:
+
+$$\phi \;=\; \frac{ad - bc}{\sqrt{(a+b)(c+d)(a+c)(b+d)}}$$
+
+It is zero exactly when $ad = bc$, the condition for the two series to be
+independent, and unlike a hit rate it cannot be raised by separating in every
+hour, because such a model has $c = d = 0$ and no variance to correlate.
+
+| border | NTC model | maxNetPos model | CNEC model |
+|---|---|---|---|
+| DE-FR | 0.261 | **0.295** | 0.230 |
+| DE-PL | 0.258 | **0.265** | 0.244 |
+| FR-BE | 0.221 | **0.320** | 0.291 |
+| DE-CZ | 0.159 | 0.169 | **0.222** |
+| DE-NL | 0.049 | 0.031 | **0.219** |
+| DE-AT | −0.013 | −0.018 | **0.148** |
+
+Two readings follow, and they pull in opposite directions.
+
+*Where the per-zone models barely separate at all, the flow-based domain adds
+real timing information.* On DE–AT, DE–NL and DE–CZ — separating in 9%, 17% and
+36% of hours under the NTC model — phi rises from about zero to 0.15–0.22.
+
+*Where the per-zone models already separate often, it adds none.* On DE–FR,
+DE–PL and FR–BE the CNEC model's phi is no higher than the maxNetPos model's and
+on the first two lower than the NTC model's, despite separating in 84% of hours
+against 53%. The gain in phi therefore tracks the gain in *frequency* rather
+than any improvement in timing, which is consistent with the model reaching the
+right number of congested hours without reaching the right ones.
+
+No value exceeds 0.32. On the three Swiss borders, where every model keeps an
+estimated bound, the hit rate equals its random benchmark to the first decimal
+and phi is within 0.05 of zero: the modelled congestion there is statistically
+independent of the observed congestion.
 
 ### 6.4 Spread distributions
 
@@ -522,10 +593,14 @@ the maxNetPos model has the smallest mean error of the three (+0.24 against
 observed), while the CNEC model has much the best standard deviation (1.00 times
 observed against 0.80).
 
-*The NTC model's DE–FR median in 2025 is exactly zero.* German and French prices
-are identical in more than half of all hours, against an observed median of
-€17.77/MWh. This is the failure described in §1: where the transfer limit does
-not bind, the two zones clear at one price and there is no spread to measure.
+The NTC model's DE–FR median prints as 0.00 against €17.77/MWh observed. This
+is not a separate result. §6.3 already reports that the model separates the
+border in 53.1% of hours, so it shows no meaningful difference in the other
+47%, and the median falls inside that block because a small share of hours
+carry a negative spread. Had that share been a point or two smaller the median
+would print as a small positive number instead, with nothing about the model
+changed. The separation frequency is the robust statement; the median is that
+frequency seen through a statistic sensitive to an unrelated detail.
 
 *The CNEC model matches how widely DE–PL prices vary in 2025 but not in 2024* —
 a standard deviation of 31.20 against 31.27 observed in 2025, but 52.80 against 37.46 in
@@ -539,7 +614,7 @@ spread is close to zero in most hours with occasional large values, which is why
 its median (17.77) sits well below its mean (28.25). The CNEC model's median
 (35.60) sits *above* its mean (27.03): it produces a moderate spread in most
 hours instead of a small one in most hours and a large one in a few. The NTC
-model produces no spread at all in most hours.
+model produces no meaningful spread in 47% of hours.
 
 ---
 
@@ -567,12 +642,11 @@ forty-five runs.
 
 Each model is compared against *its own* base case:
 
-```
-response(model)  =  spread(shock, model) - spread(base, model)
-finding            =  response(CNEC) - response(NTC)
-                   =  [ response(maxNetPos) - response(NTC)       ]   hourly step
-                    + [ response(CNEC)      - response(maxNetPos) ]   element step
-```
+$$R_m \;=\; S_m(\text{shock}) - S_m(\text{base})$$
+
+$$\underbrace{R_{\text{CNEC}} - R_{\text{NTC}}}_{\text{total}} \;=\; \underbrace{R_{\text{maxNetPos}} - R_{\text{NTC}}}_{\text{hourly step}} \;+\; \underbrace{R_{\text{CNEC}} - R_{\text{maxNetPos}}}_{\text{element step}}$$
+
+where $S_m$ is the mean spread under model $m$.
 
 ### 7.2 Perturbation sizes
 
@@ -609,7 +683,7 @@ the longer history that would supply one.
 ### 8.1 Sensitivity ratio, NTC model against CNEC model
 
 *Sensitivity* is half the difference between the two responses,
-`(response(+1sd) − response(−1sd)) / 2`. Using both directions this way cancels
+$\tfrac{1}{2}\left[R(+1\sigma) - R(-1\sigma)\right]$. Using both directions this way cancels
 the base case and measures how steeply the spread changes with the driver. The
 *ratio* is the CNEC model's
 sensitivity divided by the NTC model's.
@@ -644,7 +718,23 @@ hours while being wrong about which ones. The *size* of the price response to a
 fuel-price perturbation depends instead on how tight the limit is in the hours
 where the perturbation moves the merit order, and a bound held constant across
 the year cannot tighten in those hours whether it is written on a zone or on an
-element. 
+element.
+
+*Why the CNEC model responds most.* A spread appears when two zones want to
+trade more than the network will carry. Raising the gas price makes Germany
+more expensive, so more zones want to buy from Germany's neighbours, and the
+desired flow across the border grows. Whether that produces a price difference
+depends on whether the limit stops the flow. The limit in the CNEC model is
+recomputed every hour and written on the network elements that actually carry
+the power, so it is tight in the hours the system is stressed — which are the
+same hours a fuel-price change moves the merit order. The limit in the NTC
+model is one number for the whole year. It is an average, so it is too loose
+in the tight hours and too tight in the slack ones, and it cannot tighten in
+response to anything. The maxNetPos model sits between the two: it is
+recomputed every hour, so it tightens when the system is stressed, but it is
+written on a zone's total position rather than on the elements, so it cannot
+distinguish one of that zone's borders from another. The three sensitivities
+order themselves accordingly.
 
 ### 8.3 Driver elasticities
 
@@ -659,24 +749,83 @@ Carbon's elasticity is two to three times gas's, on both borders and in both
 years. Gas looks the larger driver in the raw responses only because its
 perturbation is 23.9% against carbon's 10.6%.
 
+### 8.4 Abbreviated Monte Carlo study on a twelve-day sample
+
+This is an abbreviated Monte Carlo study where gas and carbon prices are randomised to observe how power price speads behave in each of the NTC, maxNetPos, and CNEC models. It is abbreviated in terms of the sample size to avoid computational resource inadequecies.
+
+*Scope.* This section reports two borders, DE–FR and DE–PL,
+and summarises the other eleven in the appendix. Mean spreads and other figures are computed over 288
+hours — a sample: one Wednesday of each month, so twelve days of 2025, whereas previous sections calculated over 8760 hours. 
+
+*The sample.* The second Wednesday of each month of 2025. December moves to the third Wednesday because three hours of
+French load are absent from the ENTSO-E series on 10 December.
+All twelve are working days, which carry higher demand than weekends.
+
+*What was varied.* The drivers: the *gas price*, in euros per MWh thermal, and the
+*carbon price*, in euros per tonne. One draw is a pair of price *additions* or *shifts*, added
+to the gas and carbon prices in each hour of each of the twelve days. The coal price and every other fuel cost are held at
+their observed values.
+
+The gas and carbon price addition pair is drawn from a bivariate normal. Its standard deviations are those of
+the daily gas and carbon prices — €9.14/MWh thermal for gas and €7.54/t for
+carbon, over the 974 daily observations the repository holds, 1 January 2024 to
+31 August 2026. Its correlation is 0.222, measured on *weekly changes* in the two series. 
+
+Each of the NTC, maxNetPos, and CNEC models' power price spread set was averaged over the 288 hours of 2025 (one run), 100 times - as 100 pairs of gas and carbon price additions were drawn. 
+
+#### Does the abbreviated study recover §8.2's sensitivities?
+
+Each model's mean spread over the twelve days was regressed on the gas and carbon price shifts divided by its own standard deviation above, so the coefficients are
+euros per MWh spread per one standard deviation of driver. 
+
+€/MWh of spread per one standard deviation of the driver:
+
+| | | §8.2 gas | §8.4 gas | §8.2 carbon | §8.4 carbon |
+|---|---|---|---|---|---|
+| DE–FR | NTC | 0.90 | 1.14 | 1.87 | 1.98 |
+| | maxNetPos | 1.98 | 2.04 | 2.35 | 2.72 |
+| | CNEC | 2.40 | 2.41 | 2.84 | 3.04 |
+| DE–PL | NTC | 1.32 | 2.34 | −1.81 | −1.25 |
+| | maxNetPos | 1.33 | 1.99 | −1.66 | −1.14 |
+| | CNEC | 1.55 | 2.70 | −1.83 | −1.52 |
+
+Both borders rank the three models as §8.2 does, and DE–PL keeps its negative
+carbon coefficient: a higher carbon price lifts coal-heavy Poland more than
+gas-heavy Germany, which narrows the difference between them. The ratio between
+the outer two models is close on both borders — on DE–PL, 2.70 against 2.34 here
+and 1.55 against 1.32 in §8.2.
+
+#### Is the spread a straight-line function of the two drivers?
+
+Each regression reports an $R^{2}$: the share of the variation across the 100
+runs that the two draws account for. On DE–FR it is 0.986, 0.998 and 0.992; on
+DE–PL, 0.891, 0.905 and 0.979. Over the range drawn — −2.42 to +2.41 standard
+deviations of gas, −2.75 to +2.31 of carbon — the mean spread is close
+to a straight-line function of the two.
+
+That matters because a straight-line relationship can be calculated instead of
+simulated. If the mean spread moves by $a$ euros per standard deviation of gas
+and $b$ per standard deviation of carbon, and the two drivers have correlation
+$\rho$, the standard deviation of the resulting spreads is
+
+$$\sqrt{a^{2} + b^{2} + 2ab\rho}$$
+
+Evaluating that with each model's own coefficients and $\rho$, and
+comparing it with how much the 100 mean spreads actually varied, the two agree
+to the second decimal place on 37 of the 39 border-and-model combinations. 
+
 ---
 
 ## 9. Conclusions
 
-*It helps on one of the two borders tested and not the other.* On DE–PL the
+*The published flow-based data helps on one of the two borders tested and not
+the other.* On DE–PL the
 three models give sensitivities within 0.23 €/MWh of each other, and the NTC and
 CNEC models agree in both years, so the published data adds nothing there. On
 DE–FR the CNEC model responds 1.3 to 2.7 times more strongly than the NTC model,
 in the same direction in both years. The flow-based domain is therefore not
 better in general. It is better on some borders. Saying in advance which borders
 would need a mechanism this study does not establish.
-
-*A per-zone limit does not shrink the spread. It removes it.* On 2025 the NTC
-model's DE–FR spread has a median of exactly zero: German and French prices come
-out identical in more than half of all 8,760 hours, against an observed median
-of €17.77/MWh. Anyone using such a model to value an interconnector, or a
-contract settling on the DE–FR difference, would read zero in most hours. That
-is a different kind of error from being wrong by a few euros.
 
 *Which feature of the published data matters depends on the question asked.*
 The NTC and CNEC models differ in two ways at once, so a third model was built
@@ -697,28 +846,56 @@ for 1.08 of a 1.49 gap on gas, and half the gap on carbon (§8.2).
 This study fixes every input at its observed value and changes one at a time.
 Four extensions would matter more than the rest.
 
-*Monte Carlo simulation.* Perturbing one driver at a time measures the response
-to each in isolation. It cannot say how often a wide spread occurs, or what the
-distribution of outcomes looks like when several drivers move together, which is
-what anyone valuing an interconnector or a spread contract needs. Drawing fuel
-prices, carbon prices, weather and plant availability jointly, and solving the
-year many times over, would turn a set of sensitivities into a distribution.
-The constraint representation would matter more in that setting, not less: the
-per-zone bound is estimated from one observed pattern of flows, so the further a
-draw moves from that pattern, the less the bound describes anything real.
+*Energy storage.* Storage moves energy between hours rather than producing it,
+so the price at which an operator is willing to discharge is the value of the
+hour being given up, not the cost of fuel. This model represents none of that.
+Storage is either absent or held at its observed output at zero cost, so nothing
+offers in the middle of the cost range, which is part of why the nuclear bid
+ladder of §5.1 is being asked to compensate. The three cases differ, and are
+worth separating.
 
-*Energy storage.* Reservoir hydro, pumped storage and batteries are all held at
-their observed output and never set a price. They share a property the rest of
-the fleet does not: they move energy between hours rather than producing it, so
-the price at which an operator is willing to discharge is the value of the hour
-being given up, not the cost of fuel. A model that cannot represent that has
-nothing offering in the middle of the cost range, which is why the nuclear bid
-ladder is being asked to compensate. Letting storage optimise against that
-opportunity cost — for reservoir hydro, the water value, the price below which an
-operator would rather keep the water than generate — is the route to the
-price-level errors and to the shape of the DE–FR distribution. It also matters
-more each year, as storage takes a growing share of the flexible capacity these
-zones rely on.
+*Batteries.* Neither their consumption while charging nor
+their output while discharging enters the model. The reason is data: ENTSO-E's
+production types have no battery category, so installed capacity is not
+published on the same basis as the rest of the fleet, and the storage duration
+each unit holds is not published at all. Both would have to come from a source
+outside the public series this study restricts itself to. Even with the data,
+the addition would not be free. A battery couples one hour to the next through
+its state of charge, and it is the absence of any such coupling that makes the
+30-day solution blocks of §3 exact rather than approximate. The omission is not
+neutral: a battery adds supply in the expensive hours and demand in the cheap
+ones, which reduces how much a zone needs to trade, so the spreads reported here
+are likely to be wider than they would be with batteries present.
+
+*Pumped storage.* ENTSO-E reports both the
+generation and the consumption of these plants; this model keeps the first and
+discards the second, and prices the output at zero. The model therefore contains
+energy that was never bought. The quantity is small — pumped storage is a low
+single-digit share of generation in these zones — so the effect on the spreads
+is unlikely to be large, but its direction is known. The free energy arrives in
+the peak hours, where it relieves tightness that the market actually faced, so
+it reduces how often a border binds. Adding the pumping consumption as a load
+would remove that free energy and should widen the spreads slightly. That
+correction is cheap, because the consumption series is already downloaded. The
+remaining two errors are not: pricing the output at its true opportunity cost,
+and letting the plant choose its own hours rather than replaying observed ones,
+means representing it as a storage unit, which introduces the inter-hour
+coupling described above and removes the exact 30-day decomposition.
+
+*Reservoir hydro.* Its input is inflow, which is
+free, so there is no purchase missing from the model and no energy created that
+did not exist. What is wrong is the price. Observed generation enters at zero
+marginal cost, so water is always inframarginal and never sets a price, when in
+much of this footprint — Austria and Switzerland in particular — it regularly
+does. The correct offer is the water value: the price below which an operator
+would rather keep the water than generate. Assigning one as a fixed cost is
+computationally free but requires a number this study has no public basis for
+choosing. Deriving it inside the model, by letting the reservoir optimise across
+the year, is the version that would blow up the computational requirement, since
+a seasonal reservoir cycles once a year and cannot be represented inside a
+30-day block at all. That would require the whole year to be solved as a single
+problem, which is roughly twelve times the size of the largest problem solved
+here.
 
 *More countries and more years.* Eight zones and two years is the smallest
 credible version of this experiment. Extending the footprint would test whether
@@ -728,14 +905,19 @@ the difference between two adjacent years, and would let the model be evaluated
 across conditions — a fuel-price crisis, a nuclear outage year — that the two
 years used here do not contain.
 
-*Forecasting.* Everything here is retrospective. The flow-based domain is
-published two days ahead and exists for no future date, so a forward-looking
-model needs a constructed substitute, and the accuracy that substitute costs has
-to be measured before it is trusted. The per-zone bound has the opposite
-property: it is easy to assume forward, and this study shows what an unchanging
-bound costs in sensitivity. Establishing how each behaves out of sample is the
-step between a model that reproduces the past and one that says anything about
-the future.
+*Monte Carlo simulation.* A more comprehensive Monte Carlo, instead of being limited to the 288 hours of 2025 in this study. Other drivers could be shocked as well. 
+
+*Forecasting.* Forecasting studies are left for possible future work. Running the models in this study forward means
+have future inputs, and the three models differ sharply in how hard that is. The CNEC model needs the flow-based domain, and JAO does not publish a domain
+for a delivery day until the day before it. For any date further ahead there is
+nothing to read, so a forward-looking CNEC model would have to predict the
+domain: the PTDF coefficients and the remaining margin on each of roughly 120
+monitored elements, for every hour. The NTC model needs nothing further. Its bound is one pair of numbers per zone,
+estimated from past flows and held constant, so it can be carried to any future
+date unchanged. The maxNetPos model sits between them. JAO publishes its series day-ahead as well, so it has the CNEC
+model's problem, but the object to be predicted is two numbers per zone per hour
+rather than a domain over 120 elements. 
+
 
 ---
 
@@ -782,3 +964,128 @@ electrical link between the two countries
 PL–DE, PL–CZ, PL–SK, CZ–DE, CZ–AT and HU–AT
 ⁵ from 8 June 2022, the Core flow-based go-live, which also closed the Central
 Western Europe scheme
+
+---
+
+## Appendix B. Monte Carlo results for all thirteen borders
+
+### B.1 Mean spread, €/MWh
+
+| border | model | observed | mean | gas | carbon | $R^{2}$ | sd |
+|---|---|---|---|---|---|---|---|
+| DE–FR | NTC | 34.52 | 17.00 | 1.14 | 1.98 | 0.986 | 2.58 |
+|  | maxNetPos |  | 24.42 | 2.04 | 2.72 | 0.998 | 3.85 |
+|  | CNEC |  | 30.61 | 2.41 | 3.04 | 0.992 | 4.42 |
+| DE–PL | NTC | -8.66 | -9.81 | 2.34 | -1.25 | 0.891 | 2.39 |
+|  | maxNetPos |  | -9.48 | 1.99 | -1.14 | 0.905 | 2.04 |
+|  | CNEC |  | -14.19 | 2.70 | -1.52 | 0.979 | 2.65 |
+| DE–BE | NTC | 7.87 | 7.00 | -0.39 | 0.90 | 0.987 | 0.86 |
+|  | maxNetPos |  | 2.98 | 0.00 | 0.45 | 0.957 | 0.46 |
+|  | CNEC |  | 5.49 | -1.87 | 1.44 | 0.971 | 1.98 |
+| DE–NL | NTC | 2.98 | 4.30 | -0.46 | 0.48 | 0.928 | 0.57 |
+|  | maxNetPos |  | 3.41 | -0.17 | 0.36 | 0.955 | 0.35 |
+|  | CNEC |  | 3.56 | -1.12 | 0.74 | 0.979 | 1.13 |
+| DE–CZ | NTC | -3.36 | -3.11 | 1.72 | -0.71 | 0.991 | 1.63 |
+|  | maxNetPos |  | -4.85 | 1.21 | -0.55 | 0.956 | 1.17 |
+|  | CNEC |  | -9.38 | 1.17 | -0.90 | 0.976 | 1.23 |
+| DE–AT | NTC | -6.75 | 3.77 | -0.39 | 0.30 | 0.880 | 0.43 |
+|  | maxNetPos |  | 3.20 | -0.30 | 0.34 | 0.865 | 0.40 |
+|  | CNEC |  | 9.52 | 0.74 | 0.61 | 0.942 | 1.11 |
+| DE–CH | NTC | -5.62 | 4.94 | 0.17 | 0.61 | 0.926 | 0.70 |
+|  | maxNetPos |  | 9.07 | 0.88 | 0.90 | 0.979 | 1.45 |
+|  | CNEC |  | 13.32 | 1.15 | 1.18 | 0.956 | 1.92 |
+| FR–BE | NTC | -26.65 | -10.00 | -1.52 | -1.08 | 0.989 | 2.12 |
+|  | maxNetPos |  | -21.44 | -2.04 | -2.27 | 0.996 | 3.48 |
+|  | CNEC |  | -25.13 | -4.28 | -1.61 | 0.983 | 5.02 |
+| FR–CH | NTC | -40.14 | -12.07 | -0.97 | -1.37 | 0.992 | 1.91 |
+|  | maxNetPos |  | -15.35 | -1.16 | -1.82 | 0.995 | 2.43 |
+|  | CNEC |  | -17.29 | -1.27 | -1.86 | 0.998 | 2.54 |
+| NL–BE | NTC | 4.89 | 2.70 | 0.07 | 0.42 | 0.976 | 0.45 |
+|  | maxNetPos |  | -0.44 | 0.17 | 0.09 | 0.924 | 0.23 |
+|  | CNEC |  | 1.93 | -0.75 | 0.70 | 0.948 | 0.87 |
+| AT–CH | NTC | 1.13 | 1.17 | 0.56 | 0.31 | 0.989 | 0.71 |
+|  | maxNetPos |  | 5.87 | 1.19 | 0.56 | 0.996 | 1.45 |
+|  | CNEC |  | 3.80 | 0.41 | 0.58 | 0.952 | 0.82 |
+| AT–CZ | NTC | 3.39 | -6.88 | 2.11 | -1.01 | 0.979 | 2.04 |
+|  | maxNetPos |  | -8.05 | 1.51 | -0.89 | 0.937 | 1.53 |
+|  | CNEC |  | -18.90 | 0.43 | -1.51 | 0.936 | 1.47 |
+| CZ–PL | NTC | -5.30 | -6.71 | 0.62 | -0.54 | 0.523 | 0.94 |
+|  | maxNetPos |  | -4.63 | 0.78 | -0.59 | 0.808 | 0.90 |
+|  | CNEC |  | -4.81 | 1.53 | -0.62 | 0.971 | 1.47 |
+
+### B.2 Share of hours the border separated
+
+A border counts as separated in an hour when the two zones' prices differ by
+more than €0.50/MWh, as in §6.3. Coefficients are percentage points per one
+standard deviation of the driver.
+
+| border | model | observed | mean | gas | carbon | $R^{2}$ |
+|---|---|---|---|---|---|---|
+| DE–FR | NTC | 88.2% | 58.6% | -5.81 | +1.71 | 0.959 |
+|  | maxNetPos |  | 71.5% | -2.27 | +0.60 | 0.889 |
+|  | CNEC |  | 88.1% | +0.08 | +0.00 | 0.011 |
+| DE–PL | NTC | 86.5% | 53.6% | -9.88 | +2.21 | 0.894 |
+|  | maxNetPos |  | 46.6% | -7.81 | +1.75 | 0.845 |
+|  | CNEC |  | 88.3% | +0.76 | +0.44 | 0.236 |
+| DE–BE | NTC | 84.4% | 30.6% | -3.67 | +1.06 | 0.885 |
+|  | maxNetPos |  | 14.6% | -1.52 | +0.38 | 0.694 |
+|  | CNEC |  | 88.2% | -0.80 | +0.45 | 0.385 |
+| DE–NL | NTC | 78.5% | 20.5% | -2.25 | +0.77 | 0.768 |
+|  | maxNetPos |  | 14.7% | -0.74 | +0.39 | 0.448 |
+|  | CNEC |  | 82.4% | -1.59 | +0.84 | 0.759 |
+| DE–CZ | NTC | 77.8% | 31.0% | -3.69 | +0.86 | 0.905 |
+|  | maxNetPos |  | 26.4% | -4.06 | +0.73 | 0.894 |
+|  | CNEC |  | 87.7% | +1.30 | +0.47 | 0.460 |
+| DE–AT | NTC | 79.9% | 13.5% | -1.48 | +0.44 | 0.771 |
+|  | maxNetPos |  | 12.9% | -0.75 | +0.14 | 0.511 |
+|  | CNEC |  | 78.7% | +2.49 | -0.27 | 0.856 |
+| DE–CH | NTC | 94.4% | 23.7% | -1.27 | +0.35 | 0.860 |
+|  | maxNetPos |  | 27.9% | -0.30 | +0.05 | 0.464 |
+|  | CNEC |  | 53.6% | +1.39 | -0.22 | 0.740 |
+| FR–BE | NTC | 85.4% | 42.2% | -3.26 | +0.95 | 0.846 |
+|  | maxNetPos |  | 65.1% | -1.49 | +0.46 | 0.768 |
+|  | CNEC |  | 89.0% | -0.22 | +0.08 | 0.101 |
+| FR–CH | NTC | 98.6% | 36.8% | -4.83 | +1.40 | 0.955 |
+|  | maxNetPos |  | 46.0% | -2.09 | +0.61 | 0.846 |
+|  | CNEC |  | 48.2% | -1.55 | +0.36 | 0.884 |
+| NL–BE | NTC | 74.7% | 23.1% | -2.79 | +0.84 | 0.959 |
+|  | maxNetPos |  | 11.0% | -1.33 | +0.35 | 0.825 |
+|  | CNEC |  | 87.0% | -0.92 | +0.56 | 0.682 |
+| AT–CH | NTC | 96.2% | 20.3% | -1.28 | +0.30 | 0.779 |
+|  | maxNetPos |  | 22.8% | +0.03 | -0.04 | 0.022 |
+|  | CNEC |  | 52.4% | +1.42 | -0.17 | 0.785 |
+| AT–CZ | NTC | 79.5% | 38.6% | -6.14 | +1.62 | 0.929 |
+|  | maxNetPos |  | 32.7% | -6.76 | +1.46 | 0.973 |
+|  | CNEC |  | 90.1% | +0.31 | +0.58 | 0.260 |
+| CZ–PL | NTC | 78.5% | 45.8% | -6.24 | +1.41 | 0.859 |
+|  | maxNetPos |  | 34.4% | -4.91 | +1.21 | 0.818 |
+|  | CNEC |  | 71.7% | -0.62 | +1.67 | 0.274 |
+
+---
+
+## References
+
+Brown, T., Hörsch, J. and Schlachtberger, D. (2018). PyPSA: Python for Power
+System Analysis. *Journal of Open Research Software*, 6(4).
+https://doi.org/10.5334/jors.188
+
+Gunkel, P. A., Koduvere, H., Kirkerud, J. G., Fausto, F. J. and Ravn, H. V.
+(2020). Modelling transmission systems in energy system analysis: A comparative
+study. *Journal of Environmental Management*, 262, 110289.
+https://www.sciencedirect.com/science/article/abs/pii/S0301479720302243
+
+Ovaere, M., Kenis, M., Van den Bergh, K., Bruninx, K. and Delarue, E. (2023).
+The effect of flow-based market coupling on cross-border exchange volumes and
+price convergence in Central Western European electricity markets. *Energy
+Economics*, 118, 106519.
+https://www.sciencedirect.com/science/article/abs/pii/S0140988323000178
+
+Schönheit, D., Kenis, M., Lorenz, L., Möst, D., Delarue, E. and Bruninx, K.
+(2021). Toward a fundamental understanding of flow-based market coupling for
+cross-border electricity trading. *Advances in Applied Energy*, 2, 100027.
+https://www.sciencedirect.com/science/article/pii/S2666792421000202
+
+Weinhold, R. (2021). Evaluating Policy Implications on the Restrictiveness of
+Flow-based Market Coupling with High Shares of Intermittent Generation: A Case
+Study for Central Western Europe. arXiv:2109.04940.
+https://arxiv.org/abs/2109.04940

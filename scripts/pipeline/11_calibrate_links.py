@@ -101,7 +101,9 @@ import pandas as pd                                          # noqa: E402
 from spread.config import PROCESSED, load_config             # noqa: E402
 from spread.network import build                             # noqa: E402
 
-sys.path.insert(0, str(ROOT / "scripts"))
+# 10_build_network.py lives in scripts/pipeline/ and its name starts with a
+# digit, so it cannot be imported with a normal import statement.
+sys.path.insert(0, str(ROOT / "scripts" / "pipeline"))
 from importlib import import_module                          # noqa: E402
 load_inputs = import_module("10_build_network").load_inputs
 

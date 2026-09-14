@@ -129,7 +129,8 @@ def _shocked_cf(shock: str | None, snapshots: pd.DatetimeIndex):
 
 def load_inputs(snapshots: pd.DatetimeIndex, bands: int | None = None,
                 bid_ladder: float | None = None,
-                shock: str | None = None) -> dict:
+                shock: str | None = None,
+                gas_shift: float = 0.0, co2_shift: float = 0.0) -> dict:
     tech = yaml.safe_load(open(ROOT / "config" / "technology.yaml", encoding="utf-8"))
     if bid_ladder is not None:
         tech.setdefault("bid_ladder", {})["Nuclear"] = float(bid_ladder)
@@ -189,6 +190,25 @@ def load_inputs(snapshots: pd.DatetimeIndex, bands: int | None = None,
         log.info("SHOCK %s: %s %+.2f (1 sd of the daily series), "
                  "mean %.2f -> %.2f", shock, col, sign * sd, before, after)
 
+    # Continuous driver shifts, for Monte Carlo draws. Same parallel shift of
+    # the daily series as the block above, but of an arbitrary size, so a draw
+    # can be any pair of numbers rather than one of eight pre-committed labels.
+    # A shift of one standard deviation reproduces the corresponding --shock
+    # cell exactly. The size is recorded in standard deviations as well as in
+    # EUR, so a log can be read without the draw file to hand.
+    for amount, col in ((gas_shift, "gas_eur_mwh_th"),
+                        (co2_shift, "co2_eur_t")):
+        if not amount:
+            continue
+        sd = float(prices[col].std())
+        before = float(prices.loc[prices.index.year.isin(snapshots.year.unique()),
+                                  col].mean())
+        prices[col] = (prices[col] + amount).clip(lower=0.0)
+        after = float(prices.loc[prices.index.year.isin(snapshots.year.unique()),
+                                 col].mean())
+        log.info("SHIFT: %s %+.3f EUR (%+.3f sd), mean %.2f -> %.2f",
+                 col, amount, amount / sd if sd else float("nan"), before, after)
+
     scale_path = PROCESSED / "link_scale.csv"
     link_scale = (pd.read_csv(scale_path, index_col=0)["scale"].to_dict()
                   if scale_path.exists() else {})
@@ -224,12 +244,24 @@ def load_inputs(snapshots: pd.DatetimeIndex, bands: int | None = None,
     ENTSOE_TECH = {"Nuclear": "Nuclear"}
 
     zones = load_config()["zones"]
+
+    def _on_snapshots(per_zone: dict) -> dict:
+        """Reindex a {zone: Series} availability map onto the snapshots.
+
+        The rolling windows above are POSITIONAL, so they are taken on the
+        full contiguous generation frame where 168 rows is a week. build()
+        reads these positionally against the snapshots, so they are aligned
+        here, once, after the window has done its work.
+        """
+        return {z: s.reindex(snapshots).ffill().bfill()
+                for z, s in per_zone.items()}
+
     availability = {}
     for tech_name, setting in tech.get("availability", {}).items():
         if setting == "derived":
             key = ENTSOE_TECH.get(tech_name, tech_name)
-            availability[tech_name] = derived_availability(
-                generation.reindex(snapshots), cap_lookup, key, zones)
+            availability[tech_name] = _on_snapshots(derived_availability(
+                generation, cap_lookup, key, zones))
         else:
             availability[tech_name] = float(setting)
 
@@ -238,14 +270,14 @@ def load_inputs(snapshots: pd.DatetimeIndex, bands: int | None = None,
     obs_cfg = tech.get("availability_from_observed", {})
     if obs_cfg.get("enabled"):
         caps = observed_availability_cap(
-            generation.reindex(snapshots), cap_lookup,
+            generation, cap_lookup,
             obs_cfg.get("entsoe_series", {}), zones,
             {k: v for k, v in tech.get("availability", {}).items()
              if v != "derived"},
             window=int(obs_cfg.get("window_hours", 720)),
             floor=float(obs_cfg.get("floor", 0.45)),
         )
-        availability.update(caps)
+        availability.update({t: _on_snapshots(pz) for t, pz in caps.items()})
 
     if shock in ("frnuc+", "frnuc-"):
         # French nuclear availability is the driver section 13.4 flags as most
@@ -436,6 +468,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--year", type=int, default=None)
+    ap.add_argument("--dates", default=None,
+                    help="CSV with a 'date' column, one YYYY-MM-DD per "
+                         "row. Solves all 24 hours of each, as one "
+                         "non-contiguous snapshot set. Exact, because "
+                         "the model has no coupling between hours. "
+                         "Overrides --year and --start/--days."),
     ap.add_argument("--start", default="2025-01-13")
     ap.add_argument("--shock", default=None,
                     choices=["gas+", "gas-", "co2+", "co2-",
@@ -445,6 +483,14 @@ def main() -> None:
                          "series over the whole available window, computed at "
                          "run time and printed, so they cannot be tuned to "
                          "produce an interesting answer.")
+    ap.add_argument("--gas-shift", type=float, default=0.0,
+                    help="shift the whole daily gas series by this many EUR "
+                         "per MWh thermal. For Monte Carlo draws, where the "
+                         "size is drawn rather than pre-committed. Cannot be "
+                         "combined with --shock.")
+    ap.add_argument("--co2-shift", type=float, default=0.0,
+                    help="shift the whole daily carbon series by this many "
+                         "EUR per tonne. See --gas-shift.")
     ap.add_argument("--flow-based", nargs="?", const="auto", default=None,
                     help="use the real CORE constraints. Bare --flow-based "
                          "picks data/processed/fb_domain_<year>.parquet; give "
@@ -504,7 +550,16 @@ def main() -> None:
     cfg = load_config()
     zones = cfg["zones"]
 
-    if args.year:
+    if args.dates:
+        path = Path(args.dates)
+        if not path.is_absolute():
+            path = ROOT / path
+        days = pd.read_csv(path)["date"]
+        hours = [pd.date_range(pd.Timestamp(d, tz="UTC"), periods=24, freq="h")
+                 for d in days]
+        snapshots = pd.DatetimeIndex(sorted(set().union(*hours)))
+        log.info("dates: %d days from %s", len(days), path.name)
+    elif args.year:
         snapshots = pd.date_range(f"{args.year}-01-01", f"{args.year + 1}-01-01",
                                   freq="h", tz="UTC", inclusive="left")
     else:
@@ -514,10 +569,17 @@ def main() -> None:
     log.info("snapshots: %d, %s to %s\n",
              len(snapshots), snapshots[0], snapshots[-1])
 
+    if args.shock and (args.gas_shift or args.co2_shift):
+        raise SystemExit("--shock applies a pre-committed one-sigma step and "
+                         "--gas-shift/--co2-shift apply a drawn one; a run "
+                         "with both is neither experiment. Choose one.")
+
     t0 = time.time()
     inputs = load_inputs(snapshots, bands=args.bands,
                          bid_ladder=args.bid_ladder,
-                         shock=args.shock)
+                         shock=args.shock,
+                         gas_shift=args.gas_shift,
+                         co2_shift=args.co2_shift)
 
     if args.flow_based and args.max_net_pos:
         raise SystemExit("--flow-based and --max-net-pos are different "

@@ -1,7 +1,7 @@
 """How much do per-border limits overstate what a zone can actually do?
 
-    python scripts/43_non_additivity.py
-    python scripts/43_non_additivity.py --date 2024-07-01 --zones DE FR PL
+    python scripts/analysis/43_non_additivity.py
+    python scripts/analysis/43_non_additivity.py --date 2024-07-01 --zones DE FR PL
 
 Section 4.1 argues that transmission capacity cannot be described border by
 border, because every trade loads the same physical circuits. That argument is

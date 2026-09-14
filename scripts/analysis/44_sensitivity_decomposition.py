@@ -1,7 +1,7 @@
 """Split the sensitivity difference between the two representations in two.
 
-    python scripts/44_sensitivity_decomposition.py --year 2025
-    python scripts/44_sensitivity_decomposition.py --year 2024
+    python scripts/analysis/44_sensitivity_decomposition.py --year 2025
+    python scripts/analysis/44_sensitivity_decomposition.py --year 2024
 
 The perturbation study compares an estimated constant per-zone bound against
 the published flow-based domain, and finds the second materially more sensitive
